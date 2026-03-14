@@ -43,9 +43,7 @@ class WorkspaceManager: ObservableObject {
             guard let repoPath = session.repoRoot else { return nil }
             return SessionDefinition(
                 repoPath: repoPath,
-                startupCommand: nil,
-                terminalApp: session.terminalApp,
-                windowPreference: .newTab
+                startupCommand: nil
             )
         }
 

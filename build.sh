@@ -4,6 +4,7 @@ set -euo pipefail
 APP_NAME="SessionCtl"
 RELEASE_DIR="dist"
 APP_BUNDLE="$RELEASE_DIR/$APP_NAME.app"
+ENTITLEMENTS="Sources/SessionCtl/SessionCtl.entitlements"
 
 echo "=== Building $APP_NAME (native Swift) ==="
 
@@ -17,17 +18,13 @@ BINARY="$(swift build -c release --show-bin-path)/$APP_NAME"
 echo "-> Creating app bundle..."
 rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
-mkdir -p "$APP_BUNDLE/Contents/Resources/shell"
+mkdir -p "$APP_BUNDLE/Contents/Resources"
 
 # Copy binary
 cp "$BINARY" "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
 
 # Copy Info.plist
 cp Sources/SessionCtl/Info.plist "$APP_BUNDLE/Contents/Info.plist"
-
-# Copy shell companion
-cp shell/sessionctl.sh "$APP_BUNDLE/Contents/Resources/shell/" 2>/dev/null || true
-cp shell/sessionctl-init.sh "$APP_BUNDLE/Contents/Resources/shell/" 2>/dev/null || true
 
 # Copy icon if exists
 if [ -f assets/icon.icns ]; then
@@ -36,6 +33,10 @@ fi
 
 # Set executable permission
 chmod +x "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
+
+# Step 3: Codesign with entitlements
+echo "-> Codesigning..."
+codesign --force --sign - --entitlements "$ENTITLEMENTS" "$APP_BUNDLE"
 
 echo ""
 echo "=== Build complete ==="
