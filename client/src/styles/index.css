@@ -1,0 +1,46 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-sctl-border;
+  }
+  body {
+    @apply bg-sctl-bg text-sctl-text;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+  code, .font-mono {
+    font-family: 'JetBrains Mono', 'SF Mono', monospace;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-sctl-accent hover:bg-sctl-accentHover text-sctl-bg font-medium px-4 py-2 rounded-lg transition-colors duration-150;
+  }
+  .btn-secondary {
+    @apply bg-sctl-surface hover:bg-sctl-surfaceHover text-sctl-text border border-sctl-border px-4 py-2 rounded-lg transition-colors duration-150;
+  }
+  .card {
+    @apply bg-sctl-surface border border-sctl-border rounded-xl;
+  }
+  .input-field {
+    @apply bg-sctl-bg border border-sctl-border text-sctl-text rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-sctl-accent focus:border-transparent placeholder-sctl-textMuted;
+  }
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #3b4261;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #565f89;
+}
