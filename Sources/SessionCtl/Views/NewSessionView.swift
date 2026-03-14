@@ -88,15 +88,16 @@ struct NewSessionView: View {
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
         if panel.runModal() == .OK, let url = panel.url {
-            repoPath = url.path
+            repoPath = url.path(percentEncoded: false)
         }
     }
 
     private func launchSession() {
         guard !repoPath.isEmpty else { return }
 
+        let expandedPath = NSString(string: repoPath.trimmingCharacters(in: .whitespaces)).expandingTildeInPath
         var isDir: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: repoPath, isDirectory: &isDir),
+        guard FileManager.default.fileExists(atPath: expandedPath, isDirectory: &isDir),
               isDir.boolValue else {
             errorMessage = "Directory does not exist"
             return
@@ -106,7 +107,7 @@ struct NewSessionView: View {
         errorMessage = nil
 
         let def = SessionDefinition(
-            repoPath: repoPath,
+            repoPath: expandedPath,
             startupCommand: startupCommand.isEmpty ? nil : startupCommand,
             terminalApp: terminalApp,
             windowPreference: windowPreference

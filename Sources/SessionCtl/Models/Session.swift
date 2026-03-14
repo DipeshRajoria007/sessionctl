@@ -6,6 +6,17 @@ enum ShellType: String, Codable, Sendable {
 
 enum ToolType: String, Codable, Sendable {
     case claude, codex, aider, git, npm, other, none
+
+    static func fromProcessName(_ name: String) -> ToolType {
+        switch name.lowercased() {
+        case "claude", "claude-code": return .claude
+        case "codex": return .codex
+        case "aider": return .aider
+        case "git": return .git
+        case "npm", "npx", "yarn", "pnpm", "node": return .npm
+        default: return .other
+        }
+    }
 }
 
 enum SessionStatus: String, Codable, Sendable {
@@ -16,8 +27,10 @@ enum TerminalAppType: String, Codable, Sendable {
     case iterm2, terminal, unknown
 }
 
-enum SessionMode: String, Codable, Sendable {
-    case managed, attached
+enum DataSource: String, Codable, Sendable {
+    case discovered   // from TerminalScanner polling
+    case companion    // from shell companion socket
+    case merged       // both sources
 }
 
 struct Session: Identifiable, Codable, Sendable {
@@ -32,10 +45,15 @@ struct Session: Identifiable, Codable, Sendable {
     var currentCommand: String?
     var status: SessionStatus
     var terminalApp: TerminalAppType
-    var mode: SessionMode
+    var dataSource: DataSource
     var lastSeenAt: Date
     var createdAt: Date
     var directory: String?
+    var foregroundProcess: String?
+    var windowName: String?
+    var windowIndex: Int?
+    var tabIndex: Int?
+    var isBusy: Bool
 }
 
 struct SessionGroup: Identifiable, Sendable {
@@ -53,6 +71,7 @@ struct AppState: Sendable {
     var groups: [SessionGroup]
     var ungrouped: [Session]
     var totalCount: Int
+    var companionCount: Int
 
-    static let empty = AppState(groups: [], ungrouped: [], totalCount: 0)
+    static let empty = AppState(groups: [], ungrouped: [], totalCount: 0, companionCount: 0)
 }

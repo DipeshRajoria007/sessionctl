@@ -28,21 +28,6 @@ struct PopoverView: View {
                     .font(.headline)
 
                 Spacer()
-
-                if viewMode == .sessions {
-                    Button(action: { withAnimation { viewMode = .workspaces } }) {
-                        Image(systemName: "square.stack.3d.up")
-                    }
-                    .buttonStyle(.plain)
-                    .help("Workspaces")
-
-                    Button(action: { withAnimation { viewMode = .newSession } }) {
-                        Image(systemName: "plus")
-                    }
-                    .buttonStyle(.plain)
-                    .help("New Session")
-                    .keyboardShortcut("n", modifiers: .command)
-                }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
@@ -72,7 +57,7 @@ struct PopoverView: View {
         case .sessions: return "SessionCtl"
         case .newSession: return "New Session"
         case .workspaces: return "Workspaces"
-        case .onboarding: return "Setup"
+        case .onboarding: return "Settings"
         }
     }
 
@@ -108,14 +93,35 @@ struct PopoverView: View {
 
         // Footer
         HStack {
-            Text("\(sessionStore.appState.totalCount) sessions")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            let state = sessionStore.appState
+            if state.companionCount > 0 {
+                Text("\(state.totalCount) sessions (\(state.companionCount) with companion)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("\(state.totalCount) sessions")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             Spacer()
-            Button(action: { withAnimation { viewMode = .onboarding } }) {
-                Image(systemName: "gear")
+
+            Menu {
+                Button(action: { withAnimation { viewMode = .newSession } }) {
+                    Label("New Session", systemImage: "plus")
+                }
+                Button(action: { withAnimation { viewMode = .workspaces } }) {
+                    Label("Workspaces", systemImage: "square.stack.3d.up")
+                }
+                Divider()
+                Button(action: { withAnimation { viewMode = .onboarding } }) {
+                    Label("Settings", systemImage: "gear")
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(.caption)
             }
             .buttonStyle(.plain)
+            .menuIndicator(.hidden)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
