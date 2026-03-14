@@ -3,11 +3,8 @@ import SwiftUI
 
 @MainActor
 class SessionStore: ObservableObject {
-    @Published var sessions: [String: Session] = [:]  // keyed by TTY
+    @Published var sessions: [UUID: Session] = [:]
     @Published var searchQuery: String = ""
-
-    private let stalenessTimeout: TimeInterval = 300
-    private var pruneTimer: Timer?
 
     var appState: AppState {
         let activeSessions = sessions.values.filter { $0.status != .exited }
@@ -20,8 +17,7 @@ class SessionStore: ObservableObject {
             filtered = activeSessions.filter { session in
                 (session.repoName?.lowercased().contains(query) ?? false) ||
                 (session.branch?.lowercased().contains(query) ?? false) ||
-                (session.tool?.rawValue.lowercased().contains(query) ?? false) ||
-                (session.currentCommand?.lowercased().contains(query) ?? false) ||
+                session.tool.rawValue.lowercased().contains(query) ||
                 (session.foregroundProcess?.lowercased().contains(query) ?? false) ||
                 (session.directory?.lowercased().contains(query) ?? false)
             }
@@ -38,222 +34,82 @@ class SessionStore: ObservableObject {
             }
         }
 
-        let sortByTabOrder: ([Session]) -> [Session] = { sessions in
-            sessions.sorted { a, b in
-                if let aw = a.windowIndex, let bw = b.windowIndex, aw != bw {
-                    return aw < bw
-                }
-                if let at = a.tabIndex, let bt = b.tabIndex {
-                    return at < bt
-                }
-                return a.lastSeenAt > b.lastSeenAt
-            }
+        let sortByCreation: ([Session]) -> [Session] = { sessions in
+            sessions.sorted { $0.createdAt < $1.createdAt }
         }
 
         let groups = grouped.map { root, sessions in
             SessionGroup(
                 repoRoot: root,
                 repoName: sessions.first?.repoName,
-                sessions: sortByTabOrder(sessions)
+                sessions: sortByCreation(sessions)
             )
-        }.sorted { $0.mostRecentActivity > $1.mostRecentActivity }
-
-        let companionCount = filtered.filter { $0.dataSource == .companion || $0.dataSource == .merged }.count
+        }.sorted { ($0.repoName ?? "") < ($1.repoName ?? "") }
 
         return AppState(
             groups: groups,
-            ungrouped: sortByTabOrder(ungrouped),
-            totalCount: filtered.count,
-            companionCount: companionCount
+            ungrouped: sortByCreation(ungrouped),
+            totalCount: filtered.count
         )
     }
 
-    func startPruning() {
-        pruneTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.pruneStaleSessions()
-            }
-        }
+    // MARK: - Session Lifecycle
+
+    @discardableResult
+    func createSession(directory: String? = nil) -> UUID {
+        let session = Session(startingDirectory: directory)
+        sessions[session.id] = session
+        return session.id
     }
 
-    func stopPruning() {
-        pruneTimer?.invalidate()
-        pruneTimer = nil
-    }
-
-    // MARK: - Companion Events (socket)
-
-    func handleEvent(_ event: SessionEvent) {
-        let now = Date()
-        // The companion now sends TTY as sessionId directly
-        let tty = event.tty ?? event.sessionId
-
-        switch event.type {
-        case "session_init":
-            if var existing = sessions[tty] {
-                // Merge: upgrade to .merged
-                existing.dataSource = .merged
-                existing.pid = event.pid ?? existing.pid
-                existing.shellType = ShellType(rawValue: event.shellType ?? "zsh") ?? existing.shellType
-                existing.directory = event.initialDirectory ?? existing.directory
-                existing.lastSeenAt = now
-                sessions[tty] = existing
-            } else {
-                let session = Session(
-                    id: tty,
-                    tty: tty,
-                    pid: event.pid ?? 0,
-                    shellType: ShellType(rawValue: event.shellType ?? "zsh") ?? .zsh,
-                    status: .idle,
-                    terminalApp: .unknown,
-                    dataSource: .companion,
-                    lastSeenAt: now,
-                    createdAt: now,
-                    directory: event.initialDirectory,
-                    isBusy: false
-                )
-                sessions[tty] = session
-            }
-
-        case "directory_changed":
-            guard var session = sessions[tty] else { return }
-            session.directory = event.directory
-            session.repoRoot = event.repoRoot
-            session.repoName = event.repoName
-            session.branch = event.branch
-            session.lastSeenAt = now
-            sessions[tty] = session
-
-        case "command_start":
-            guard var session = sessions[tty] else { return }
-            session.currentCommand = event.command
-            session.tool = ToolType(rawValue: event.tool ?? "other") ?? .other
-            session.status = .running
-            session.isBusy = true
-            session.lastSeenAt = now
-            sessions[tty] = session
-
-        case "command_end":
-            guard var session = sessions[tty] else { return }
-            session.currentCommand = nil
-            session.status = .idle
-            session.isBusy = false
-            session.lastSeenAt = now
-            sessions[tty] = session
-
-        case "session_exit":
-            guard var session = sessions[tty] else { return }
-            session.status = .exited
-            session.lastSeenAt = now
-            sessions[tty] = session
-            let key = tty
-            Task { @MainActor in
-                try? await Task.sleep(for: .seconds(2))
-                self.sessions.removeValue(forKey: key)
-            }
-
-        default:
-            break
-        }
-    }
-
-    // MARK: - Discovery Merge
-
-    func mergeDiscoveredSessions(_ discovered: [DiscoveredSession]) {
-        let now = Date()
-        let discoveredTTYs = Set(discovered.map(\.tty))
-
-        // Remove sessions that are no longer discovered (tab was closed)
-        // Only remove discovered-only sessions; keep companion-only sessions (they self-manage)
-        let keysToRemove = sessions.keys.filter { tty in
-            !discoveredTTYs.contains(tty) && sessions[tty]?.dataSource == .discovered
-        }
-        for key in keysToRemove {
-            sessions.removeValue(forKey: key)
-        }
-
-        for disc in discovered {
-            if var existing = sessions[disc.tty] {
-                // Merge discovered data into existing session
-                existing.terminalApp = disc.terminalApp
-                existing.windowIndex = disc.windowIndex
-                existing.tabIndex = disc.tabIndex
-                existing.windowName = disc.windowName
-                existing.lastSeenAt = now
-
-                // Discovered provides CWD/git when companion hasn't set them
-                if existing.dataSource == .discovered || existing.directory == nil {
-                    existing.directory = disc.directory
-                }
-                if existing.dataSource == .discovered || existing.repoRoot == nil {
-                    existing.repoRoot = disc.repoRoot
-                    existing.repoName = disc.repoName
-                    existing.branch = disc.branch
-                }
-
-                // Foreground process from discovery
-                existing.foregroundProcess = disc.foregroundProcess
-                existing.pid = disc.pid
-
-                // Busy state: companion is authoritative when merged, discovery otherwise
-                if existing.dataSource == .discovered {
-                    existing.isBusy = disc.isBusy
-                }
-
-                // Tool from process name when companion hasn't set one
-                if existing.dataSource == .discovered, !disc.foregroundProcess.isEmpty {
-                    existing.tool = ToolType.fromProcessName(disc.foregroundProcess)
-                    existing.status = .running
-                } else if existing.dataSource == .discovered {
-                    existing.tool = nil
-                    existing.status = .idle
-                }
-
-                if existing.dataSource == .companion {
-                    existing.dataSource = .merged
-                }
-
-                sessions[disc.tty] = existing
-            } else {
-                // New discovered session
-                let isShell = disc.foregroundProcess.isEmpty
-                let tool: ToolType? = isShell ? nil : ToolType.fromProcessName(disc.foregroundProcess)
-
-                let session = Session(
-                    id: disc.tty,
-                    tty: disc.tty,
-                    pid: disc.pid,
-                    shellType: .zsh,
-                    repoRoot: disc.repoRoot,
-                    repoName: disc.repoName,
-                    branch: disc.branch,
-                    tool: tool,
-                    status: isShell ? .idle : .running,
-                    terminalApp: disc.terminalApp,
-                    dataSource: .discovered,
-                    lastSeenAt: now,
-                    createdAt: now,
-                    directory: disc.directory,
-                    foregroundProcess: disc.foregroundProcess,
-                    windowName: disc.windowName,
-                    windowIndex: disc.windowIndex,
-                    tabIndex: disc.tabIndex,
-                    isBusy: disc.isBusy
-                )
-                sessions[disc.tty] = session
-            }
-        }
-    }
-
-    func removeSession(_ id: String) {
+    func closeSession(id: UUID) {
         sessions.removeValue(forKey: id)
     }
 
-    private func pruneStaleSessions() {
-        let cutoff = Date().addingTimeInterval(-stalenessTimeout)
-        let staleKeys = sessions.filter { $0.value.lastSeenAt < cutoff }.map(\.key)
-        for key in staleKeys {
-            sessions.removeValue(forKey: key)
-        }
+    func updateShellPID(_ id: UUID, pid: pid_t) {
+        sessions[id]?.shellPID = pid
+    }
+
+    // MARK: - Process Monitor Updates
+
+    struct ProcessUpdate {
+        let foregroundProcess: String?
+        let tool: ToolType
+        let status: SessionStatus
+    }
+
+    struct GitUpdate {
+        let directory: String?
+        let repoRoot: String?
+        let repoName: String?
+        let branch: String?
+    }
+
+    func handleProcessUpdate(id: UUID, update: ProcessUpdate) {
+        guard sessions[id] != nil else { return }
+        sessions[id]?.foregroundProcess = update.foregroundProcess
+        sessions[id]?.tool = update.tool
+        sessions[id]?.status = update.status
+    }
+
+    func handleGitUpdate(id: UUID, update: GitUpdate) {
+        guard sessions[id] != nil else { return }
+        sessions[id]?.directory = update.directory
+        sessions[id]?.repoRoot = update.repoRoot
+        sessions[id]?.repoName = update.repoName
+        sessions[id]?.branch = update.branch
+    }
+
+    func handleDirectoryChange(id: UUID, directory: String) {
+        guard sessions[id] != nil else { return }
+        sessions[id]?.directory = directory
+    }
+
+    func session(for id: UUID) -> Session? {
+        sessions[id]
+    }
+
+    var allSessions: [Session] {
+        Array(sessions.values).sorted { $0.createdAt < $1.createdAt }
     }
 }

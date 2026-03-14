@@ -5,66 +5,77 @@ struct SessionCtlApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {
-        MenuBarExtra {
-            PopoverView()
+        WindowGroup {
+            MainWindow()
                 .environmentObject(appDelegate.sessionStore)
-                .environmentObject(appDelegate.workspaceManager)
-        } label: {
-            let count = appDelegate.sessionStore.appState.totalCount
-            if count > 0 {
-                Label("\(count)", systemImage: "terminal.fill")
-            } else {
-                Label("SessionCtl", systemImage: "terminal.fill")
+                .environmentObject(appDelegate.splitManager)
+        }
+        .defaultSize(width: 1200, height: 800)
+        .commands {
+            CommandGroup(replacing: .newItem) {
+                Button("New Terminal") {
+                    appDelegate.newTerminal()
+                }
+                .keyboardShortcut("t", modifiers: .command)
+
+                Divider()
+
+                Button("Split Horizontal") {
+                    appDelegate.splitHorizontal()
+                }
+                .keyboardShortcut("d", modifiers: .command)
+
+                Button("Split Vertical") {
+                    appDelegate.splitVertical()
+                }
+                .keyboardShortcut("d", modifiers: [.command, .shift])
+
+                Divider()
+
+                Button("Close Pane") {
+                    appDelegate.closeCurrentPane()
+                }
+                .keyboardShortcut("w", modifiers: .command)
+            }
+            CommandGroup(after: .windowArrangement) {
+                Button("Next Pane") {
+                    appDelegate.splitManager.selectNextPane()
+                }
+                .keyboardShortcut("]", modifiers: .command)
+
+                Button("Previous Pane") {
+                    appDelegate.splitManager.selectPreviousPane()
+                }
+                .keyboardShortcut("[", modifiers: .command)
             }
         }
-        .menuBarExtraStyle(.window)
     }
 }
 
 @MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
     let sessionStore = SessionStore()
-    let workspaceManager = WorkspaceManager()
-    private var socketServer: SocketServer?
+    let splitManager = SplitManager()
     private var hotkeyManager: HotkeyManager?
-    private var terminalScanner: TerminalScanner?
+    private var processMonitor: ProcessMonitor?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        startSocketServer()
-        startTerminalScanner()
-        sessionStore.startPruning()
         setupHotkey()
+        startProcessMonitor()
+
+        // Create initial terminal if none exist
+        if splitManager.root == nil {
+            newTerminal()
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        socketServer?.stop()
-        terminalScanner?.stop()
-        sessionStore.stopPruning()
         hotkeyManager?.unregister()
+        processMonitor?.stop()
     }
 
-    private func startSocketServer() {
-        socketServer = SocketServer { [weak self] event in
-            Task { @MainActor in
-                self?.sessionStore.handleEvent(event)
-            }
-        }
-        do {
-            try socketServer?.start()
-        } catch {
-            print("[SessionCtl] Socket server failed: \(error)")
-        }
-    }
-
-    private func startTerminalScanner() {
-        let scanner = TerminalScanner()
-        scanner.onUpdate = { [weak self] discovered in
-            Task { @MainActor in
-                self?.sessionStore.mergeDiscoveredSessions(discovered)
-            }
-        }
-        scanner.start()
-        terminalScanner = scanner
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        true
     }
 
     private func setupHotkey() {
@@ -72,5 +83,56 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         hotkeyManager?.register {
             NSApp.activate(ignoringOtherApps: true)
         }
+    }
+
+    private func startProcessMonitor() {
+        let monitor = ProcessMonitor()
+        monitor.onProcessUpdate = { [weak self] sessionID, update in
+            Task { @MainActor in
+                self?.sessionStore.handleProcessUpdate(id: sessionID, update: update)
+            }
+        }
+        monitor.onGitUpdate = { [weak self] sessionID, update in
+            Task { @MainActor in
+                self?.sessionStore.handleGitUpdate(id: sessionID, update: update)
+            }
+        }
+        monitor.start()
+        processMonitor = monitor
+    }
+
+    func newTerminal(directory: String? = nil) {
+        let sessionID = sessionStore.createSession(directory: directory)
+        splitManager.addPane(sessionID: sessionID)
+    }
+
+    func splitHorizontal() {
+        guard let selected = splitManager.selectedPaneSessionID else { return }
+        let sessionID = sessionStore.createSession(
+            directory: sessionStore.session(for: selected)?.directory
+        )
+        splitManager.splitHorizontal(sessionID: sessionID)
+    }
+
+    func splitVertical() {
+        guard let selected = splitManager.selectedPaneSessionID else { return }
+        let sessionID = sessionStore.createSession(
+            directory: sessionStore.session(for: selected)?.directory
+        )
+        splitManager.splitVertical(sessionID: sessionID)
+    }
+
+    func closeCurrentPane() {
+        guard let selected = splitManager.selectedPaneSessionID else { return }
+        splitManager.closePane(sessionID: selected)
+        sessionStore.closeSession(id: selected)
+
+        // Register shell PID removal with process monitor
+        processMonitor?.unregisterSession(selected)
+    }
+
+    func registerShellPID(sessionID: UUID, pid: pid_t) {
+        sessionStore.updateShellPID(sessionID, pid: pid)
+        processMonitor?.registerSession(sessionID, shellPID: pid)
     }
 }
