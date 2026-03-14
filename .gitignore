@@ -1,7 +1,17 @@
-node_modules/
+# Build
+.build/
 dist/
+
+# macOS
 .DS_Store
-*.log
+
+# Environment
 .env
+*.log
+
+# Runtime
 .sessionctl/
+
+# Legacy
+node_modules/
 coverage/
