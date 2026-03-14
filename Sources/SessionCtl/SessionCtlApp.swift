@@ -27,15 +27,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     let workspaceManager = WorkspaceManager()
     private var socketServer: SocketServer?
     private var hotkeyManager: HotkeyManager?
+    private var terminalScanner: TerminalScanner?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         startSocketServer()
+        startTerminalScanner()
         sessionStore.startPruning()
         setupHotkey()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         socketServer?.stop()
+        terminalScanner?.stop()
         sessionStore.stopPruning()
         hotkeyManager?.unregister()
     }
@@ -51,6 +54,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         } catch {
             print("[SessionCtl] Socket server failed: \(error)")
         }
+    }
+
+    private func startTerminalScanner() {
+        let scanner = TerminalScanner()
+        scanner.onUpdate = { [weak self] discovered in
+            Task { @MainActor in
+                self?.sessionStore.mergeDiscoveredSessions(discovered)
+            }
+        }
+        scanner.start()
+        terminalScanner = scanner
     }
 
     private func setupHotkey() {

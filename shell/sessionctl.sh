@@ -24,7 +24,7 @@ SESSIONCTL_ENABLED="${SESSIONCTL_ENABLED:-1}"
 
 # Generate a stable session ID from TTY path
 __sessionctl_tty=$(tty 2>/dev/null || echo "/dev/unknown")
-__sessionctl_session_id=$(echo -n "$__sessionctl_tty" | shasum -a 256 2>/dev/null | cut -c1-16 || echo "unknown")
+__sessionctl_session_id="$__sessionctl_tty"
 __sessionctl_shell_type="${ZSH_VERSION:+zsh}"
 __sessionctl_shell_type="${__sessionctl_shell_type:-bash}"
 __sessionctl_cmd_start_time=""

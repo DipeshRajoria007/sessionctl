@@ -10,7 +10,7 @@ struct OnboardingView: View {
         VStack(spacing: 0) {
             switch step {
             case 0: welcomeStep
-            case 1: shellSetupStep
+            case 1: companionStep
             case 2: doneStep
             default: doneStep
             }
@@ -31,22 +31,37 @@ struct OnboardingView: View {
                 .foregroundStyle(.blue)
             Text("Welcome to SessionCtl")
                 .font(.title3.weight(.semibold))
-            Text("Mission control for your AI terminal sessions. See all your sessions at a glance, grouped by repository.")
+            Text("SessionCtl automatically tracks all your terminal sessions. Every open tab in iTerm2 and Terminal.app appears here — no setup required.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
+
+            if !sessionStore.sessions.isEmpty {
+                Text("\(sessionStore.sessions.count) sessions already detected!")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.blue)
+                    .padding(.top, 4)
+            }
+
             Spacer()
-            Button("Get Started") { step = 1 }
-                .buttonStyle(.borderedProminent)
+            HStack {
+                Spacer()
+                Button("Next") { step = 1 }
+                    .buttonStyle(.borderedProminent)
+            }
         }
     }
 
-    private var shellSetupStep: some View {
+    private var companionStep: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Install Shell Companion")
-                .font(.title3.weight(.semibold))
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles")
+                    .foregroundStyle(.orange)
+                Text("Optional: Shell Companion")
+                    .font(.title3.weight(.semibold))
+            }
 
-            Text("Add this line to your ~/.\(detectedShell)rc:")
+            Text("Install the shell companion for richer data — exact commands, durations, and exit statuses.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
@@ -70,7 +85,7 @@ struct OnboardingView: View {
                 .help("Copy to clipboard")
             }
 
-            Text("Then open a new terminal window to activate.")
+            Text("Add to ~/.\(detectedShell)rc, then open a new terminal.")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
 
@@ -80,7 +95,10 @@ struct OnboardingView: View {
                 Button("Back") { step = 0 }
                     .buttonStyle(.plain)
                 Spacer()
-                Button("Next") { step = 2 }
+                Button("Skip") { step = 2 }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                Button("Done") { step = 2 }
                     .buttonStyle(.borderedProminent)
             }
         }
@@ -100,9 +118,16 @@ struct OnboardingView: View {
                 .multilineTextAlignment(.center)
 
             if !sessionStore.sessions.isEmpty {
-                Text("\(sessionStore.sessions.count) sessions already detected!")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.blue)
+                let state = sessionStore.appState
+                if state.companionCount > 0 {
+                    Text("\(state.totalCount) sessions detected (\(state.companionCount) with companion)")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.blue)
+                } else {
+                    Text("\(state.totalCount) sessions detected")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.blue)
+                }
             }
 
             Spacer()

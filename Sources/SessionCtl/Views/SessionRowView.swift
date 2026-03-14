@@ -14,7 +14,37 @@ struct SessionRowView: View {
     }
 
     private var toolLabel: String {
-        session.tool?.rawValue ?? "shell"
+        if let tool = session.tool, tool != .none, tool != .other {
+            return tool.rawValue
+        }
+        if let fg = session.foregroundProcess, !fg.isEmpty {
+            return fg
+        }
+        return "idle"
+    }
+
+    private var toolBadgeColor: Color {
+        if let tool = session.tool {
+            switch tool {
+            case .claude: return .purple
+            case .codex: return .orange
+            case .aider: return .green
+            case .git: return .red
+            case .npm: return .yellow
+            case .other, .none: return .blue
+            }
+        }
+        return .secondary
+    }
+
+    private var primaryLabel: String {
+        if let name = session.repoName {
+            return name
+        }
+        if let dir = session.directory {
+            return (dir as NSString).lastPathComponent
+        }
+        return session.tty
     }
 
     private var terminalIcon: String {
@@ -37,33 +67,52 @@ struct SessionRowView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 4) {
-                    if let branch = session.branch {
+                    Text(primaryLabel)
+                        .font(.caption.weight(.medium))
+                        .lineLimit(1)
+
+                    if let branch = session.branch, !branch.isEmpty {
                         Image(systemName: "arrow.triangle.branch")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                         Text(branch)
                             .font(.caption)
+                            .foregroundStyle(.secondary)
                             .lineLimit(1)
                     }
-
-                    Text(toolLabel)
-                        .font(.caption.weight(.medium))
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 1)
-                        .background(.blue.opacity(0.15))
-                        .foregroundStyle(.blue)
-                        .clipShape(RoundedRectangle(cornerRadius: 3))
                 }
 
-                if let cmd = session.currentCommand {
-                    Text(cmd)
-                        .font(.caption2.monospaced())
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                HStack(spacing: 4) {
+                    Text(toolLabel)
+                        .font(.caption2.weight(.medium))
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(toolBadgeColor.opacity(0.15))
+                        .foregroundStyle(toolBadgeColor)
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+
+                    if let cmd = session.currentCommand {
+                        Text(cmd)
+                            .font(.caption2.monospaced())
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    } else if let windowName = session.windowName, !windowName.isEmpty {
+                        Text(windowName)
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
                 }
             }
 
             Spacer()
+
+            if session.dataSource == .merged {
+                Image(systemName: "link.circle.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.green.opacity(0.6))
+                    .help("Shell companion active")
+            }
 
             Image(systemName: terminalIcon)
                 .font(.caption)
@@ -80,7 +129,7 @@ struct SessionRowView: View {
             Button("Focus") { focusSession() }
             Button("Close Session") { closeSession() }
             Divider()
-            if let path = session.repoRoot {
+            if let path = session.repoRoot ?? session.directory {
                 Button("Copy Path") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(path, forType: .string)
