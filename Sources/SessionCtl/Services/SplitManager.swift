@@ -79,6 +79,29 @@ indirect enum SplitNode: Identifiable {
 class SplitManager: ObservableObject {
     @Published var root: SplitNode?
     @Published var selectedPaneSessionID: UUID?
+    @Published var splitRatios: [UUID: CGFloat] = [:]  // nodeID -> ratio (0.0-1.0)
+
+    /// Snap points for split ratios
+    static let snapPoints: [CGFloat] = [0.25, 1.0/3.0, 0.5, 2.0/3.0, 0.75]
+    static let snapThreshold: CGFloat = 0.02  // snap within 2% of a snap point
+
+    func ratio(for nodeID: UUID) -> CGFloat {
+        splitRatios[nodeID] ?? 0.5
+    }
+
+    func setRatio(_ ratio: CGFloat, for nodeID: UUID) {
+        let clamped = max(0.1, min(0.9, ratio))
+        splitRatios[nodeID] = snap(clamped)
+    }
+
+    private func snap(_ value: CGFloat) -> CGFloat {
+        for point in Self.snapPoints {
+            if abs(value - point) < Self.snapThreshold {
+                return point
+            }
+        }
+        return value
+    }
 
     func addPane(sessionID: UUID) {
         let newLeaf = SplitNode.leaf(id: UUID(), sessionID: sessionID)
